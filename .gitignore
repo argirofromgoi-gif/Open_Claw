@@ -3,3 +3,6 @@ client_secret.json
 config.py
 *.log
 __pycache__/
+bot_stats.json
+projects.json
+token.json
