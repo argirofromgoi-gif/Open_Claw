@@ -24,7 +24,9 @@ CHANNEL_NAMES = {
 # Pricing per 1M tokens (input, output) in USD
 MODEL_PRICING = {
     "claude-sonnet-4-6": {"input": 3.00,  "output": 15.00},
-    "gpt-4o-mini":       {"input": 0.15,  "output": 0.60},
+    "claude-code":        {"input": 3.00,  "output": 15.00},
+    "gpt-4o-mini":        {"input": 0.15,  "output": 0.60},
+    "gpt-image-1":        {"input": 5.00,  "output": 40.00},
 }
 
 DEFAULT_STATS = {
@@ -82,7 +84,7 @@ DEFAULT_STATS = {
         },
         "dev": {
             "name":               "Dev Claude 🛠️",
-            "model":              "claude-sonnet-4-6",
+            "model":              "claude-code",
             "channelId":          "1488438587778269304",
             "totalMessages":      0,
             "totalToolCalls":     0,
