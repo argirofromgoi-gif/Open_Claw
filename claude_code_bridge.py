@@ -14,10 +14,16 @@ Claude Code Discord Bridge
 """
 
 import asyncio
+import json
 import os
 import subprocess
 import tempfile
 from pathlib import Path
+
+try:
+    from logger import log_api_call as _log_api_call
+except ImportError:
+    _log_api_call = None
 
 # Discord Channel ID για το #dev_claude
 CLAUDE_CODE_CHANNEL_ID = 1488438587778269304
@@ -73,7 +79,12 @@ async def run_claude_code_simple(prompt: str, working_dir: str = WORKSPACE) -> s
         result = await loop.run_in_executor(
             None,
             lambda: subprocess.run(
-                ["/home/ubuntu/.npm-global/bin/claude", "-p", prompt, "--dangerously-skip-permissions"],
+                [
+                    "/home/ubuntu/.npm-global/bin/claude",
+                    "-p", prompt,
+                    "--dangerously-skip-permissions",
+                    "--output-format", "json",
+                ],
                 cwd=working_dir,
                 capture_output=True,
                 text=True,
@@ -81,8 +92,30 @@ async def run_claude_code_simple(prompt: str, working_dir: str = WORKSPACE) -> s
             )
         )
 
-        output = result.stdout.strip()
+        raw = result.stdout.strip()
         errors = result.stderr.strip()
+
+        # Parse JSON output to extract text result and token usage
+        output = raw
+        input_tokens = 0
+        output_tokens = 0
+
+        if raw:
+            try:
+                data = json.loads(raw)
+                output = data.get("result", raw)
+                usage = data.get("usage", {})
+                input_tokens = int(usage.get("input_tokens", 0))
+                output_tokens = int(usage.get("output_tokens", 0))
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass  # raw text fallback
+
+        # Log token usage and cost into bot_stats.json under the 'dev' agent
+        if _log_api_call is not None and (input_tokens or output_tokens):
+            try:
+                _log_api_call(CLAUDE_CODE_CHANNEL_ID, input_tokens, output_tokens)
+            except Exception:
+                pass
 
         if output:
             return output
