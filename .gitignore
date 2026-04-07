@@ -1,0 +1,5 @@
+tokens/
+client_secret.json
+config.py
+*.log
+__pycache__/
