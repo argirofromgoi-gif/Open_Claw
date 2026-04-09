@@ -297,7 +297,7 @@ Before making the WordPress API call, verify EVERY item below is true. Fix anyth
   [ ] Short paragraphs (max 3-4 sentences)
   [ ] At least 3 H2 subheadings
   [ ] Conclusion with CTA included
-  [ ] All Yoast fields ready: yoast_focus_keyword, yoast_seo_title, yoast_meta_description
+  [ ] All Yoast fields ready and set as TOP-LEVEL keys (not in meta): yoast_focus_keyword, yoast_seo_title, yoast_meta_description
   [ ] No keyword stuffing — keyphrase used naturally
   [ ] NO bold text in body paragraphs or lists (bold only in headings)
   [ ] NO em-dashes (—) anywhere in the article
@@ -362,7 +362,12 @@ The JSON payload must include:
   - excerpt: first 2 sentences of the article
   - categories: relevant category IDs (look up or create appropriate categories via the API)
   - tags: relevant tag IDs (look up or create appropriate tags via the API)
-  - meta fields for Yoast: yoast_focus_keyword, yoast_seo_title, yoast_meta_description
+  - Yoast SEO fields as TOP-LEVEL keys in the JSON payload (NOT nested inside "meta"):
+      "yoast_focus_keyword": "<the 2-4 word focus keyphrase>",
+      "yoast_seo_title": "<SEO title starting with keyphrase, 50-60 chars>",
+      "yoast_meta_description": "<meta description, exactly 120-155 chars>"
+    IMPORTANT: these must be sent as direct keys at the root of the JSON body, NOT inside a "meta" object. Example payload structure:
+      {{"title": "...", "content": "...", "status": "draft", "yoast_focus_keyword": "...", "yoast_seo_title": "...", "yoast_meta_description": "..."}}
   - featured_media: the media ID from Step 5
 
 Use Python's `requests` library or `urllib` to make the API call.
@@ -376,7 +381,7 @@ Log the result clearly at the end.
 
 ## ABSOLUTE PROHIBITIONS — NEVER DO THESE
 - Never publish below 600 words
-- Never leave any Yoast field empty (yoast_focus_keyword, yoast_seo_title, yoast_meta_description)
+- Never leave any Yoast field empty, and always send them as TOP-LEVEL keys in the REST API payload, never nested inside "meta" (fields: yoast_focus_keyword, yoast_seo_title, yoast_meta_description)
 - Never use passive voice in more than 10% of sentences
 - Never write a sentence longer than 20 words
 - Never keyword stuff — use the keyphrase naturally
