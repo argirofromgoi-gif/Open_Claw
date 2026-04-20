@@ -119,7 +119,7 @@ async def _ask_claude_vision(image_data: bytes, ext: str, user_prompt: str, chan
     b64 = base64.standard_b64encode(image_data).decode("utf-8")
     prompt = user_prompt.strip() if user_prompt.strip() else "Describe this image in detail."
     response = await anthropic_client.messages.create(
-        model="claude-opus-4-6",
+        model="claude-sonnet-4-6",
         max_tokens=4096,
         messages=[
             {
@@ -147,7 +147,7 @@ async def _ask_claude_text(content: str, filename: str, user_prompt: str, channe
     prompt = user_prompt.strip() if user_prompt.strip() else f"Summarize and analyze the following file: {filename}"
     full_prompt = f"{prompt}\n\n--- File: {filename} ---\n{content}"
     response = await anthropic_client.messages.create(
-        model="claude-opus-4-6",
+        model="claude-sonnet-4-6",
         max_tokens=4096,
         messages=[{"role": "user", "content": full_prompt}],
     )

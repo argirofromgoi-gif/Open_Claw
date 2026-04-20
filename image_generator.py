@@ -10,11 +10,19 @@ from googleapiclient.http import MediaIoBaseUpload
 
 from config import OPENAI_API_KEY
 from auth import get_user_creds
+from memory import add_to_history, save_last_image, get_last_image
 
 _openai = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 _TRIGGER_PATTERN = re.compile(
     r'\b(create|generate|make|draw|produce)\s+(an?\s+)?image\b',
+    re.IGNORECASE,
+)
+
+_FOLLOWUP_PATTERN = re.compile(
+    r'\b(change|modify|edit|update|alter)\s+(it|that|this|the\s+image)\b'
+    r'|\b(now\s+(make|change|add|give)\s+it)\b'
+    r'|\b(same\s+image\s+but)\b',
     re.IGNORECASE,
 )
 
@@ -26,6 +34,10 @@ _STYLE_PATTERN = re.compile(
 
 def _is_image_request(text: str) -> bool:
     return bool(_TRIGGER_PATTERN.search(text))
+
+
+def _is_followup_request(text: str) -> bool:
+    return bool(_FOLLOWUP_PATTERN.search(text))
 
 
 def _parse_request(text: str) -> tuple:
@@ -104,13 +116,17 @@ async def handle_image_request(message) -> bool:
     Detect and handle image generation requests in a Discord message.
     Returns True if the message was handled, False otherwise.
     """
-    if not _is_image_request(message.content):
+    channel_id = message.channel.id
+    is_new = _is_image_request(message.content)
+    is_followup = _is_followup_request(message.content)
+
+    if not is_new and not is_followup:
         return False
 
     description, style = _parse_request(message.content)
     prompt = f"{description}, in {style} style" if style else description
 
-    # Collect a reference image from attachments or the first image URL in the message.
+    # Collect a reference image from attachments, message URLs, or cached last image.
     reference_image_bytes = None
     if message.attachments:
         for attachment in message.attachments:
@@ -121,6 +137,17 @@ async def handle_image_request(message) -> bool:
         url_match = re.search(r'https?://\S+\.(?:png|jpg|jpeg|webp|gif)', message.content, re.IGNORECASE)
         if url_match:
             reference_image_bytes = await _fetch_image_bytes(url_match.group(0))
+    if reference_image_bytes is None and is_followup:
+        cached = get_last_image(channel_id)
+        if cached:
+            try:
+                reference_image_bytes = await _fetch_image_bytes(cached["url"])
+                if not prompt.strip():
+                    prompt = cached["prompt"]
+            except Exception:
+                pass
+
+    add_to_history(channel_id, "user", message.content)
 
     async with message.channel.typing():
         try:
@@ -130,7 +157,10 @@ async def handle_image_request(message) -> bool:
             filename = f"{safe_name or 'image'}.png"
 
             drive_link = await _upload_to_drive(image_bytes, filename, message.author.id)
-            await message.channel.send(f"Here is your generated image:\n{drive_link}")
+            reply = f"Here is your generated image:\n{drive_link}"
+            await message.channel.send(reply)
+            save_last_image(channel_id, drive_link, prompt)
+            add_to_history(channel_id, "assistant", reply)
 
         except RuntimeError as e:
             await message.channel.send(str(e))

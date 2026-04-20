@@ -36,6 +36,7 @@ from video_handler import handle_video_request
 from image_generator import handle_image_request
 from claude_code_bridge import handle_claude_code_channel, CLAUDE_CODE_CHANNEL_ID
 from file_handler import handle_file_attachment
+from memory import add_to_history, get_history, clear_history
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -44,22 +45,7 @@ anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 # MEMORY
 # =========================
 
-conversation_history = {}
 file_registry = {}
-MAX_HISTORY = 20
-
-
-def get_history(channel_id):
-    if channel_id not in conversation_history:
-        conversation_history[channel_id] = []
-    return conversation_history[channel_id]
-
-
-def add_to_history(channel_id, role, content):
-    history = get_history(channel_id)
-    history.append({"role": role, "content": content})
-    if len(history) > MAX_HISTORY:
-        conversation_history[channel_id] = history[-MAX_HISTORY:]
 
 
 def get_registry(channel_id):
@@ -964,6 +950,9 @@ async def on_message(message):
         try:
             async with message.channel.typing():
                 reply = await handle_file_attachment(attachment, message.content, message.channel.id)
+            user_text = message.content or f"[attachment: {attachment.filename}]"
+            add_to_history(message.channel.id, "user", user_text)
+            add_to_history(message.channel.id, "assistant", reply)
             log_reply_sent(message.channel.id, reply)
             if len(reply) <= 2000:
                 await message.channel.send(reply)
