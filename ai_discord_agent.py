@@ -48,7 +48,7 @@ anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 _rate_limit = {}  # {user_id: [timestamp, ...]}
 RATE_LIMIT_MAX = 10   # max requests
 RATE_LIMIT_WINDOW = 60  # per 60 seconds
-MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+MAX_FILE_SIZE = 200 * 1024 * 1024  # 200 MB
 
 
 def _is_rate_limited(user_id: int) -> bool:
