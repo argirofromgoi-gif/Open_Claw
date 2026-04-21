@@ -42,6 +42,26 @@ anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
 
 
 # =========================
+# RATE LIMITING
+# =========================
+
+_rate_limit = {}  # {user_id: [timestamp, ...]}
+RATE_LIMIT_MAX = 10   # max requests
+RATE_LIMIT_WINDOW = 60  # per 60 seconds
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+
+
+def _is_rate_limited(user_id: int) -> bool:
+    now = datetime.now(timezone.utc).timestamp()
+    timestamps = [t for t in _rate_limit.get(user_id, []) if now - t < RATE_LIMIT_WINDOW]
+    _rate_limit[user_id] = timestamps
+    if len(timestamps) >= RATE_LIMIT_MAX:
+        return True
+    _rate_limit[user_id].append(now)
+    return False
+
+
+# =========================
 # MEMORY
 # =========================
 
@@ -413,29 +433,29 @@ async def calendar_delete_event(event_id, user_id):
     )
 
 
+_OWN_FILE = os.path.abspath(__file__)
+
+
 async def read_own_code():
-    with open("/home/ubuntu/ai_discord_agent.py", "r") as f:
+    with open(_OWN_FILE, "r") as f:
         return f.read()
 
 
 async def edit_own_code(find_text, replace_text):
     import shutil
+    import subprocess
 
-    # Backup πριν κάθε αλλαγή
-    shutil.copy(
-        "/home/ubuntu/ai_discord_agent.py",
-        "/home/ubuntu/backup/ai_discord_agent_auto.py",
-    )
-    with open("/home/ubuntu/ai_discord_agent.py", "r") as f:
+    backup_dir = os.path.join(os.path.dirname(_OWN_FILE), "backup")
+    os.makedirs(backup_dir, exist_ok=True)
+    shutil.copy(_OWN_FILE, os.path.join(backup_dir, "ai_discord_agent_auto.py"))
+
+    with open(_OWN_FILE, "r") as f:
         content = f.read()
     if find_text not in content:
         return f"❌ Text not found: {find_text[:50]}"
     new_content = content.replace(find_text, replace_text, 1)
-    with open("/home/ubuntu/ai_discord_agent.py", "w") as f:
+    with open(_OWN_FILE, "w") as f:
         f.write(new_content)
-    # Restart bot
-    import subprocess
-
     subprocess.Popen(["sudo", "systemctl", "restart", "discord-bot"])
     return "✅ Code updated and bot restarting..."
 
@@ -877,25 +897,27 @@ async def run_agent(user_text, channel_id, user_id):
             tool_name = tc.function.name
             tool_args = json.loads(tc.function.arguments)
             tool_result = await execute_tool(tool_name, tool_args, channel_id, user_id)
+            result_str = str(tool_result) if tool_result else ""
 
-            if tool_result:
-                final_reply = str(tool_result)
-                if model.startswith("claude"):
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": tc.id,
-                                    "content": str(tool_result),
-                                }
-                            ],
-                        }
-                    )
+            if result_str:
+                final_reply = result_str
+
+            if model.startswith("claude"):
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tc.id,
+                                "content": result_str,
+                            }
+                        ],
+                    }
+                )
             else:
                 messages.append(
-                    {"role": "tool", "tool_call_id": tc.id, "content": str(tool_result)}
+                    {"role": "tool", "tool_call_id": tc.id, "content": result_str}
                 )
 
     if not final_reply:
@@ -937,6 +959,9 @@ async def on_message(message):
     if message.channel.id == CLAUDE_CODE_CHANNEL_ID:
         await handle_claude_code_channel(message)
         return
+    if _is_rate_limited(message.author.id):
+        await message.channel.send("⚠️ Πολλά μηνύματα σε σύντομο χρονικό διάστημα. Περίμενε λίγο.")
+        return
     if await handle_video_request(message):
         return
     if await handle_image_request(message):
@@ -946,22 +971,25 @@ async def on_message(message):
 
     # File attachment handler
     if message.attachments:
-        attachment = message.attachments[0]
-        try:
-            async with message.channel.typing():
-                reply = await handle_file_attachment(attachment, message.content, message.channel.id)
-            user_text = message.content or f"[attachment: {attachment.filename}]"
-            add_to_history(message.channel.id, "user", user_text)
-            add_to_history(message.channel.id, "assistant", reply)
-            log_reply_sent(message.channel.id, reply)
-            if len(reply) <= 2000:
-                await message.channel.send(reply)
-            else:
-                for chunk in [reply[i : i + 1990] for i in range(0, len(reply), 1990)]:
-                    await message.channel.send(chunk)
-        except Exception as e:
-            log_error(message.channel.id, str(e))
-            raise
+        for attachment in message.attachments:
+            if attachment.size > MAX_FILE_SIZE:
+                await message.channel.send(f"⚠️ Το αρχείο `{attachment.filename}` είναι πολύ μεγάλο (max 20MB).")
+                continue
+            try:
+                async with message.channel.typing():
+                    reply = await handle_file_attachment(attachment, message.content, message.channel.id)
+                user_text = message.content or f"[attachment: {attachment.filename}]"
+                add_to_history(message.channel.id, "user", user_text)
+                add_to_history(message.channel.id, "assistant", reply)
+                log_reply_sent(message.channel.id, reply)
+                if len(reply) <= 2000:
+                    await message.channel.send(reply)
+                else:
+                    for chunk in [reply[i : i + 1990] for i in range(0, len(reply), 1990)]:
+                        await message.channel.send(chunk)
+            except Exception as e:
+                log_error(message.channel.id, str(e))
+                raise
         return
 
     # Κανονικό μήνυμα → AI agent
