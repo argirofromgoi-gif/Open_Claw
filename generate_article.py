@@ -197,7 +197,7 @@ Use the WebSearch tool to:
         if article_type == "trending":
             research_section = """
 ## STEP 1 — RESEARCH
-Use the WebSearch tool to find the top trending digital marketing topics in Greece and globally this week (April 2026).
+Use the WebSearch tool to find the top trending digital marketing topics in Greece and globally this week ({current_month_year}).
 Pick the single best trending topic with a rising search volume (trending upward right now).
 Find at least 3 authoritative sources (industry reports, major publications) to cite.
 Include recent data published within the last 30 days.
@@ -216,7 +216,14 @@ Identify a strong 2-4 word Greek focus keyphrase for SEO.
 Identify related LSI keywords and synonyms to use naturally in the article.
 """
 
-    slug_hint = "digital-marketing-greece-2026" if article_type == "trending" else "content-marketing-stratigi"
+    current_month_year = datetime.now().strftime("%B %Y")
+    year = datetime.now().strftime("%Y")
+    if keyword:
+        slug_hint = re.sub(r"[^\w\s-]", "", keyword).strip().lower().replace(" ", "-")
+    elif topic:
+        slug_hint = re.sub(r"[^\w\s-]", "", topic[:30]).strip().lower().replace(" ", "-")
+    else:
+        slug_hint = f"digital-marketing-greece-{year}" if article_type == "trending" else "content-marketing-stratigi"
     type_note = "trending" if article_type == "trending" else "evergreen / timeless"
 
     return f"""
@@ -247,7 +254,7 @@ BODY CONTENT:
   - Use bullet points and numbered lists where appropriate.
   - Include real data, statistics, and facts with sources cited.
   - Write from a position of expertise — demonstrate experience and authority on the topic.
-  - Include the publication date context (April 2026) where relevant.
+  - Include the publication date context ({current_month_year}) where relevant.
   - Aim for a Flesch Reading Ease score of 60-80: clear, readable prose.
   - Vary sentence length for rhythm.
   - Use transition words (ωστόσο, επομένως, επιπλέον, συνεπώς, επιπροσθέτως, κατά συνέπεια, παρ' όλα αυτά, αντίθετα) in at least 30% of sentences.
@@ -395,8 +402,8 @@ def extract_published_url(output: str) -> str | None:
     match = re.search(r"PUBLISHED_URL:\s*(https?://\S+)", output)
     if match:
         return match.group(1).rstrip(".")
-    # Fallback: find any growthmedia.gr URL in the output
-    match = re.search(r"(https?://growthmedia\.gr/[^\s\"'<>]+)", output)
+    # Fallback: look only for draft post URLs (/?p=ID pattern)
+    match = re.search(r"(https?://growthmedia\.gr/\?p=\d+)", output)
     if match:
         return match.group(1).rstrip(".")
     return None
@@ -445,7 +452,7 @@ def run(article_type: str, topic: str = "", keyword: str = "",
         logging.info("Article generation completed successfully (type=%s)", article_type)
 
         # Update Google Sheet column E if we have a sheet reference
-        if spreadsheet_id and row_index and access_token:
+        if spreadsheet_id and row_index > 0 and access_token:
             url = extract_published_url(result.stdout)
             if url:
                 cell = f"E{row_index}"
