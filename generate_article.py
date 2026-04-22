@@ -241,44 +241,42 @@ def get_today_assignment() -> dict | None:
 
 def get_cf_assignment() -> dict | None:
     """
-    Connect to Google Sheets, find 'Chris Fountoulis Content Calendar', and return
-    the row whose column A matches today's date (DD/MM/YYYY) and column E is empty.
-
-    Returns a dict with keys: topic, keyword, article_type, row_index, spreadsheet_id, access_token
-    or None if no matching row is found.
+    Read the CF content calendar and return the row whose column A matches today's date.
+    Column layout: A=Date, B=Topic, C=Type, D=Focus Keyword, G=Desired slug, H=Published URL
+    Published URL is written to column H after generation.
     """
     today_str = datetime.now().strftime("%d/%m/%Y")
     logging.info("[CF] Looking for sheet row with date: %s", today_str)
 
     access_token = _get_access_token()
-    spreadsheet_id = _find_spreadsheet_id(access_token, "Chris Fountoulis Content Calendar")
-    rows = _read_sheet_values(access_token, spreadsheet_id)
+    rows = _read_sheet_values(access_token, CF_SPREADSHEET_ID, sheet_range="A:H")
 
     for i, row in enumerate(rows):
         if not row:
             continue
-        cell_date = row[0].strip() if len(row) > 0 else ""
-        cell_url = row[4].strip() if len(row) > 4 else ""
+        cell_date     = row[0].strip() if len(row) > 0 else ""
+        published_url = row[7].strip() if len(row) > 7 else ""
 
-        if cell_date == today_str and cell_url == "":
-            topic = row[1].strip() if len(row) > 1 else ""
-            keyword = row[2].strip() if len(row) > 2 else ""
-            article_type = row[3].strip().lower() if len(row) > 3 else "trending"
+        if cell_date == today_str and not published_url:
+            topic        = row[1].strip() if len(row) > 1 else ""
+            article_type = row[2].strip().lower() if len(row) > 2 else "evergreen"
+            keyword      = row[3].strip() if len(row) > 3 else ""
 
             logging.info(
-                "[CF] Found assignment: date=%s, topic=%s, keyword=%s, type=%s (sheet row %d)",
+                "[CF] Found assignment: date=%s, topic=%s, keyword=%s, type=%s (row %d)",
                 today_str, topic, keyword, article_type, i + 1,
             )
             return {
-                "topic": topic,
-                "keyword": keyword,
-                "article_type": article_type,
-                "row_index": i + 1,
-                "spreadsheet_id": spreadsheet_id,
-                "access_token": access_token,
+                "topic":          topic,
+                "keyword":        keyword,
+                "article_type":   article_type,
+                "row_index":      i + 1,
+                "spreadsheet_id": CF_SPREADSHEET_ID,
+                "access_token":   access_token,
+                "url_column":     "H",
             }
 
-    logging.info("[CF] No unpublished row found for date %s in 'Chris Fountoulis Content Calendar'.", today_str)
+    logging.info("[CF] No row found for date %s (or already published).", today_str)
     return None
 
 
@@ -1191,7 +1189,7 @@ def send_sunday_summary(
 
 def run(article_type: str, topic: str = "", keyword: str = "",
         spreadsheet_id: str = "", row_index: int = 0, access_token: str = "",
-        site: str = "goi") -> tuple[int, str | None]:
+        site: str = "goi", url_column: str = "E") -> tuple[int, str | None]:
     """
     Run article generation for one site.
 
@@ -1242,9 +1240,9 @@ def run(article_type: str, topic: str = "", keyword: str = "",
 
         published_url = url_extractor(result.stdout)
 
-        # Update Google Sheet column E if we have a sheet reference
+        # Update Google Sheet with published URL
         if spreadsheet_id and row_index > 0 and access_token and published_url:
-            cell = f"E{row_index}"
+            cell = f"{url_column}{row_index}"
             try:
                 _update_cell(access_token, spreadsheet_id, cell, published_url)
                 logging.info("[%s] Sheet updated: row %d column E = %s", site_label, row_index, published_url)
@@ -1356,6 +1354,7 @@ if __name__ == "__main__":
             row_index=cf_assignment["row_index"],
             access_token=cf_assignment["access_token"],
             site="cf",
+            url_column=cf_assignment.get("url_column", "H"),
         )
     else:
         if cf_exit == 0:
