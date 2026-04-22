@@ -215,24 +215,26 @@ def get_today_assignment() -> dict | None:
         if not row:
             continue
         cell_date = row[0].strip() if len(row) > 0 else ""
-        cell_url = row[4].strip() if len(row) > 4 else ""
+        cell_url  = row[5].strip() if len(row) > 5 else ""
 
         if cell_date == today_str and cell_url == "":
-            topic = row[1].strip() if len(row) > 1 else ""
-            keyword = row[2].strip() if len(row) > 2 else ""
-            article_type = row[3].strip().lower() if len(row) > 3 else "trending"
+            # A=Date, B=Day, C=Topic, D=Focus Keyword, E=Type, F=Article URL
+            topic        = row[2].strip() if len(row) > 2 else ""
+            keyword      = row[3].strip() if len(row) > 3 else ""
+            article_type = row[4].strip().lower() if len(row) > 4 else "trending"
 
             logging.info(
                 "Found assignment: date=%s, topic=%s, keyword=%s, type=%s (sheet row %d)",
                 today_str, topic, keyword, article_type, i + 1,
             )
             return {
-                "topic": topic,
-                "keyword": keyword,
-                "article_type": article_type,
-                "row_index": i + 1,   # 1-based sheet row number
+                "topic":          topic,
+                "keyword":        keyword,
+                "article_type":   article_type,
+                "row_index":      i + 1,
                 "spreadsheet_id": spreadsheet_id,
-                "access_token": access_token,
+                "access_token":   access_token,
+                "url_column":     "F",
             }
 
     logging.info("No unpublished row found for date %s in 'GOI Content Calendar'.", today_str)
