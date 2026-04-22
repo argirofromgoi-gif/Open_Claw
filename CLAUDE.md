@@ -212,3 +212,72 @@ Both articles must follow ALL the rules above before publishing.
 - Never use em-dashes (—) in the article — use commas or periods instead
 - Never write above 8th grade reading level — keep language simple and clear
 - Never publish without fetching and setting a featured image from Unsplash
+
+---
+
+## gosmart.gr WooCommerce — Χρώματα
+
+**API credentials:**
+```
+BASE = "https://gosmart.gr/wp-json/wc/v3"
+AUTH = HTTPBasicAuth("Magda Poursanidou", "yu9Z 0DEC GfnC TtsX DPom 8kvU")
+Global Χρώμα attribute ID = 2
+```
+
+### Ροή όταν σου δίνουν SKUs για χρώματα
+
+1. **Check** — κάνε GET για κάθε SKU, δες τρέχον χρώμα + όνομα προϊόντος
+2. **Πρότεινε** — βάσισε το νέο όνομα στον αγγλικό κωδικό μέσα στο όνομα (π.χ. "DUSTY-ROSE 102" → "Dusty Rose 102")
+3. **Περίμενε έγκριση** — μην τρέξεις το fix πριν ο χρήστης πει "ναι"
+4. **Fix** — ενημέρωσε μέσω PUT /products/{id}
+
+### Κανόνες ονοματολογίας
+- Κάθε χρώμα πρέπει να είναι **απολύτως μοναδικό** — ούτε μέσα στο batch ούτε με προηγούμενα
+- Αν υπάρχει ήδη το όνομα, πρόσθεσε αριθμό (π.χ. "Μαύρο 101", "Μαύρο 102", "Μαύρο 103")
+- Format: `Όνομα Κωδικός` (π.χ. "Dark Rose 101", "Oil Blue 102")
+
+### Ήδη χρησιμοποιημένα ονόματα
+Μαύρο 101, Μαύρο 103, Dark Rose, Dark Rose 101, Dusty Rose, Dusty Rose 102, Βιολετί, Λάβαντα, Λιλά 101, Lilac 101, Φραπέ, Frappe Brown 101, Taupe, Taupe Brown, Μπορντώ 102, Μπορντώ 103, Deep Bordeaux 102, Ροζ Sweet, Pink Sweet, Ροζ Nectar, Pink Nectar 102, Πετρόλ Oil, Oil Blue 102, Oil Green 102, Θαλασσί, Sand, Metal Grey, Grey Rose, Καφέ 101, Clear Water, Mint Green, Lavender Spring, Violet Ice, Classic Blue, Mauve Purple, Summer Grey, Black 101, Chocola 102, Oat Ecrou 102, Mineral Grey 102, Natural Grey 102, Nomad 102, Sea Blue 102
+
+### Κώδικας check
+```python
+import requests
+from requests.auth import HTTPBasicAuth
+BASE = "https://gosmart.gr/wp-json/wc/v3"
+AUTH = HTTPBasicAuth("Magda Poursanidou", "yu9Z 0DEC GfnC TtsX DPom 8kvU")
+ATTR_ID = 2
+
+for sku in skus:
+    p = requests.get(f"{BASE}/products", params={"sku": sku}, auth=AUTH).json()[0]
+    color = next((a["options"] for a in p.get("attributes",[]) if "χρώμ" in a.get("name","").lower()), [])
+    print(f"{sku}: {', '.join(color) or '—'}  {p['name']}")
+```
+
+### Κώδικας fix
+```python
+import requests
+from requests.auth import HTTPBasicAuth
+BASE = "https://gosmart.gr/wp-json/wc/v3"
+AUTH = HTTPBasicAuth("Magda Poursanidou", "yu9Z 0DEC GfnC TtsX DPom 8kvU")
+ATTR_ID = 2
+
+COLORS = { "02.XXXXX": "Χρώμα Όνομα" }  # συμπλήρωσε
+
+terms = requests.get(f"{BASE}/products/attributes/{ATTR_ID}/terms", params={"per_page": 100}, auth=AUTH).json()
+terms_map = {t["name"].lower(): t["id"] for t in terms}
+
+def get_or_create_term(name):
+    key = name.lower()
+    if key not in terms_map:
+        r = requests.post(f"{BASE}/products/attributes/{ATTR_ID}/terms", json={"name": name}, auth=AUTH)
+        terms_map[key] = r.json().get("id")
+    return terms_map[key]
+
+for sku, color in COLORS.items():
+    p = requests.get(f"{BASE}/products", params={"sku": sku}, auth=AUTH).json()[0]
+    get_or_create_term(color)
+    others = [a for a in p.get("attributes",[]) if a.get("id") != ATTR_ID]
+    others.append({"id": ATTR_ID, "options": [color], "visible": True, "variation": False})
+    resp = requests.put(f"{BASE}/products/{p['id']}", json={"attributes": others}, auth=AUTH)
+    print(f"{'✅' if resp.status_code==200 else '❌'} {sku}: {color}")
+```
