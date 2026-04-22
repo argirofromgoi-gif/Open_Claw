@@ -969,7 +969,10 @@ JSON payload must include:
   - excerpt: first 2 sentences of the article
   - categories: relevant category IDs (look up or create via API)
   - tags: relevant tag IDs (look up or create via API)
-  - meta fields: yoast_focus_keyword, yoast_seo_title, yoast_meta_description
+  - Yoast SEO fields as TOP-LEVEL keys in the JSON payload (NOT nested inside "meta"):
+      "yoast_focus_keyword": "<the 2-4 word focus keyphrase>",
+      "yoast_seo_title": "<SEO title starting with keyphrase, 50-60 chars>",
+      "yoast_meta_description": "<meta description, exactly 120-155 chars>"
   - featured_media: the media ID from Step 5
 
 After publishing, output EXACTLY this line:
