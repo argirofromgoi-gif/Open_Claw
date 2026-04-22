@@ -261,15 +261,17 @@ def get_cf_assignment() -> dict | None:
             topic        = row[1].strip() if len(row) > 1 else ""
             article_type = row[2].strip().lower() if len(row) > 2 else "evergreen"
             keyword      = row[3].strip() if len(row) > 3 else ""
+            slug         = row[6].strip().strip("/") if len(row) > 6 else ""
 
             logging.info(
-                "[CF] Found assignment: date=%s, topic=%s, keyword=%s, type=%s (row %d)",
-                today_str, topic, keyword, article_type, i + 1,
+                "[CF] Found assignment: date=%s, topic=%s, keyword=%s, type=%s, slug=%s (row %d)",
+                today_str, topic, keyword, article_type, slug, i + 1,
             )
             return {
                 "topic":          topic,
                 "keyword":        keyword,
                 "article_type":   article_type,
+                "slug":           slug,
                 "row_index":      i + 1,
                 "spreadsheet_id": CF_SPREADSHEET_ID,
                 "access_token":   access_token,
@@ -775,13 +777,15 @@ def get_today_cf_assignment() -> dict | None:
 # CF prompt builder (English, Chris Fountoulis style)
 # ---------------------------------------------------------------------------
 
-def build_cf_prompt(article_type: str, topic: str = "", keyword: str = "") -> str:
+def build_cf_prompt(article_type: str, topic: str = "", keyword: str = "", slug: str = "") -> str:
     """Build the Claude prompt for chrisfountoulis.com in Chris Fountoulis's writing style."""
 
     current_month_year = datetime.now().strftime("%B %Y")
     year = datetime.now().strftime("%Y")
 
-    if keyword:
+    if slug:
+        slug_hint = slug
+    elif keyword:
         slug_hint = re.sub(r"[^\w\s-]", "", keyword).strip().lower().replace(" ", "-")
     elif topic:
         slug_hint = re.sub(r"[^\w\s-]", "", topic[:40]).strip().lower().replace(" ", "-")
@@ -1189,7 +1193,7 @@ def send_sunday_summary(
 
 def run(article_type: str, topic: str = "", keyword: str = "",
         spreadsheet_id: str = "", row_index: int = 0, access_token: str = "",
-        site: str = "goi", url_column: str = "E") -> tuple[int, str | None]:
+        site: str = "goi", url_column: str = "E", slug: str = "") -> tuple[int, str | None]:
     """
     Run article generation for one site.
 
@@ -1197,7 +1201,7 @@ def run(article_type: str, topic: str = "", keyword: str = "",
     site: "goi" for growthmedia.gr, "cf" for chrisfountoulis.com
     """
     if site == "cf":
-        prompt = build_cf_prompt(article_type, topic, keyword)
+        prompt = build_cf_prompt(article_type, topic, keyword, slug)
         site_label = "chrisfountoulis.com"
         url_extractor = extract_cf_published_url
     else:
@@ -1355,6 +1359,7 @@ if __name__ == "__main__":
             access_token=cf_assignment["access_token"],
             site="cf",
             url_column=cf_assignment.get("url_column", "H"),
+            slug=cf_assignment.get("slug", ""),
         )
     else:
         if cf_exit == 0:
