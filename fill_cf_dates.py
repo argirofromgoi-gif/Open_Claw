@@ -101,28 +101,37 @@ def main():
     access_token = _get_access_token()
     rows = _read_sheet(access_token)
 
-    # Find rows with empty date (column A) — skip header row
+    today = datetime.now().date()
+
+    # Find rows where date is empty or in the past
     empty_rows = []
     for i, row in enumerate(rows):
         cell_date = row[0].strip() if len(row) > 0 else ""
-        topic = row[1].strip() if len(row) > 1 else "(no topic)"
+        topic     = row[1].strip() if len(row) > 1 else "(no topic)"
         if i == 0 and cell_date.lower() in ("date", "ημερομηνία", ""):
             continue  # skip header
-        if not cell_date:
-            empty_rows.append((i + 1, topic))  # 1-based row index
+        needs_date = not cell_date
+        if cell_date:
+            try:
+                if datetime.strptime(cell_date, "%d/%m/%Y").date() < today:
+                    needs_date = True
+            except ValueError:
+                needs_date = True
+        if needs_date:
+            empty_rows.append((i + 1, topic, cell_date or "—"))
 
     if not empty_rows:
-        print("No empty date cells found. Nothing to do.")
+        print("All rows already have future dates. Nothing to do.")
         return
 
-    print(f"\nFound {len(empty_rows)} rows with no date.\n")
+    print(f"\nFound {len(empty_rows)} rows that need a new date.\n")
     schedule = generate_schedule(len(empty_rows))
 
-    print(f"{'Row':<6} {'Date':<14} Topic")
-    print("-" * 70)
+    print(f"{'Row':<6} {'Old date':<14} {'New date':<14} Topic")
+    print("-" * 80)
     updates = []
-    for (row_idx, topic), date_str in zip(empty_rows, schedule):
-        print(f"{row_idx:<6} {date_str:<14} {topic}")
+    for (row_idx, topic, old_date), date_str in zip(empty_rows, schedule):
+        print(f"{row_idx:<6} {old_date:<14} {date_str:<14} {topic}")
         updates.append((f"A{row_idx}", date_str))
 
     if not apply:
