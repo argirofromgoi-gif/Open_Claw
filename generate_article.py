@@ -21,7 +21,7 @@ import re
 import json
 import base64
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -45,8 +45,59 @@ CF_WP_URL  = "https://chrisfountoulis.com"
 CF_WP_USER = "fountoulisc@gmail.com"
 CF_WP_PASS = "kZK4 8biH 93g5 CVCU Pd3H vcLS"
 
+CF_SPREADSHEET_ID = "178jvepS4CDfjId7rgvCZOBzv5GQ-Sey0ASSMQJctd0o"
+
 # Sunday summary email recipient
 SUMMARY_EMAIL_TO = "chris@chrisfountoulis.com"
+
+# Real Business Insights articles — used for backlinks and style reference
+REAL_BUSINESS_INSIGHTS = [
+    {
+        "title": "I spent 1 year in a €1K per month Mastermind",
+        "url": "https://chrisfountoulis.com/case-study-1-year-in-a-e1k-per-month-mastermind/",
+        "themes": ["mastermind", "networking", "investment", "community", "business growth", "mindset"],
+    },
+    {
+        "title": "Why an MBA Harvard Grad Partnered with me for Digital Marketing",
+        "url": "https://chrisfountoulis.com/insight-why-an-mba-harvard-grad-partnered-with-me-for-digital-marketing/",
+        "themes": ["digital marketing", "credibility", "partnership", "personal brand", "expertise"],
+    },
+    {
+        "title": "We Helped a $1M Per Year Company Find Their First Winning Ad in 8 Weeks",
+        "url": "https://chrisfountoulis.com/we-helped-a-1m-per-year-company-find-their-first-winning-ad-in-8-weeks/",
+        "themes": ["ads", "Facebook ads", "paid ads", "conversion", "winning ad", "advertising"],
+    },
+    {
+        "title": "How I scaled my membership from 0 to over 5,000 members",
+        "url": "https://chrisfountoulis.com/how-i-scaled-my-membership-from-0-to-over-5000-members/",
+        "themes": ["membership", "community", "scaling", "growth", "audience building"],
+    },
+    {
+        "title": "How I got scammed for $8.5K by marketers",
+        "url": "https://chrisfountoulis.com/how-i-got-scammed-for-8-5k-by-marketers/",
+        "themes": ["scam", "trust", "marketing", "lessons learned", "due diligence"],
+    },
+    {
+        "title": "What happens when you message +10,000 strangers to buy your stuff",
+        "url": "https://chrisfountoulis.com/what-happens-when-you-message-10000-strangers-to-buy-your-stuff/",
+        "themes": ["cold outreach", "DMs", "sales", "messaging", "prospecting"],
+    },
+    {
+        "title": "How to run profitable & scalable ads",
+        "url": "https://chrisfountoulis.com/how-to-run-profitable-scalable-ads-article/",
+        "themes": ["profitable ads", "scalable ads", "Facebook ads", "Meta ads", "advertising ROI"],
+    },
+    {
+        "title": "How to spend $300,000 on ads when you only have $100",
+        "url": "https://chrisfountoulis.com/how-to-spend-300000-on-ads-when-you-only-have-100/",
+        "themes": ["ads budget", "ad spending", "bootstrapping", "Facebook ads", "leverage"],
+    },
+    {
+        "title": "How To Find Brand Deals Without Depending On A Modeling Agency",
+        "url": "https://chrisfountoulis.com/how-to-find-brand-deals-without-depending-on-a-modeling-agency-or-sales-calls/",
+        "themes": ["brand deals", "influencer", "agency", "sales", "outreach", "partnerships"],
+    },
+]
 
 # ---------------------------------------------------------------------------
 # Google Sheets helpers
@@ -674,6 +725,272 @@ Log the result clearly at the end.
 
 
 # ---------------------------------------------------------------------------
+# CF sheet lookup (columns: A=Date, B=Topic, C=Type, D=Focus Keyword, G=URL)
+# ---------------------------------------------------------------------------
+
+def get_today_cf_assignment() -> dict | None:
+    """
+    Read the Chris Fountoulis content calendar spreadsheet and return the row
+    whose column A matches today's date (DD/MM/YYYY) and column G is empty.
+
+    Returns a dict with keys: topic, keyword, article_type, row_index,
+    spreadsheet_id, access_token, url_column — or None if no row found.
+    """
+    today_str = datetime.now().strftime("%d/%m/%Y")
+    logging.info("[CF] Looking for sheet row with date: %s", today_str)
+
+    access_token = _get_access_token()
+    rows = _read_sheet_values(access_token, CF_SPREADSHEET_ID, sheet_range="A:G")
+
+    for i, row in enumerate(rows):
+        if not row:
+            continue
+        cell_date = row[0].strip() if len(row) > 0 else ""
+        cell_url = row[6].strip() if len(row) > 6 else ""
+
+        if cell_date == today_str and cell_url == "":
+            topic = row[1].strip() if len(row) > 1 else ""
+            article_type = row[2].strip().lower() if len(row) > 2 else "evergreen"
+            keyword = row[3].strip() if len(row) > 3 else ""
+
+            logging.info(
+                "[CF] Found assignment: date=%s, topic=%s, keyword=%s, type=%s (row %d)",
+                today_str, topic, keyword, article_type, i + 1,
+            )
+            return {
+                "topic": topic,
+                "keyword": keyword,
+                "article_type": article_type,
+                "row_index": i + 1,
+                "spreadsheet_id": CF_SPREADSHEET_ID,
+                "access_token": access_token,
+                "url_column": "G",
+            }
+
+    logging.info("[CF] No unpublished row found for date %s.", today_str)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# CF prompt builder (English, Chris Fountoulis style)
+# ---------------------------------------------------------------------------
+
+def build_cf_prompt(article_type: str, topic: str = "", keyword: str = "") -> str:
+    """Build the Claude prompt for chrisfountoulis.com in Chris Fountoulis's writing style."""
+
+    current_month_year = datetime.now().strftime("%B %Y")
+    year = datetime.now().strftime("%Y")
+
+    if keyword:
+        slug_hint = re.sub(r"[^\w\s-]", "", keyword).strip().lower().replace(" ", "-")
+    elif topic:
+        slug_hint = re.sub(r"[^\w\s-]", "", topic[:40]).strip().lower().replace(" ", "-")
+    else:
+        slug_hint = f"business-growth-{year}"
+
+    type_note = "trending" if article_type == "trending" else "evergreen / timeless"
+
+    rbi_list = "\n".join(
+        f'  - "{a["title"]}": {a["url"]}'
+        for a in REAL_BUSINESS_INSIGHTS
+    )
+
+    if topic and keyword:
+        research_section = f"""
+## STEP 1 — RESEARCH
+The topic for today's article is: **{topic}**
+The focus keyphrase is: **{keyword}**
+
+Use the WebSearch tool to:
+- Find the latest data, statistics and trends about this topic (within the last 6 months where possible)
+- Find at least 3 authoritative sources to cite (industry reports, major publications, .gov or .edu sites)
+- Check what competitors are ranking for on the target keyphrase "{keyword}"
+- Identify related LSI keywords and synonyms to use naturally in the article
+
+Also visit these Real Business Insights articles by Chris Fountoulis and extract:
+- Personal stories, real examples, and insights that are relevant to **{topic}**
+- Quotes or lessons Chris has shared that connect to this article's message
+- At least 1 of these articles to link to from within the article body (pick the most topically relevant):
+{rbi_list}
+"""
+    else:
+        research_section = f"""
+## STEP 1 — RESEARCH
+Use the WebSearch tool to find a strong {type_note} topic related to: personal branding, digital marketing, business growth, or entrepreneurship — relevant to English-speaking business owners and entrepreneurs in {current_month_year}.
+
+Also visit these Real Business Insights articles by Chris Fountoulis and extract:
+- Personal stories, real examples, and insights that connect to the chosen topic
+- At least 1 of these articles to link to from within the article body (pick the most topically relevant):
+{rbi_list}
+"""
+
+    return f"""
+You are writing a blog article for **chrisfountoulis.com** — the personal brand site of Chris Fountoulis, a digital marketing expert and entrepreneur.
+
+Your task is to research, write, and publish ONE {type_note} article IN ENGLISH to WordPress.
+
+---
+
+## CHRIS FOUNTOULIS WRITING STYLE — FOLLOW THIS EXACTLY
+
+Study the Real Business Insights articles (listed in Step 1) and mirror this style:
+
+**Voice:** First-person. Conversational. Direct. Like a smart friend telling you what actually happened.
+**Tone:** Honest, vulnerable, and confident. Share wins AND failures. Never preachy.
+**Sentence length:** Mix short punchy sentences ("That was it. I was done.") with longer explanatory ones. Vary constantly.
+**Vocabulary:** Simple. A 10-year-old should understand every sentence. No jargon. If a technical term is needed, explain it immediately in plain words.
+**Structure:** Open with a real story or a surprising statement. Then break down the lesson. End with a clear takeaway.
+**Paragraphs:** 1-3 sentences max. White space is your friend.
+**Personal touch:** Use real numbers, real timelines, real emotions. Vague is boring. Specific is memorable.
+**Avoid:** Corporate language. Passive voice. Generic advice. Filler phrases ("In today's world…", "It goes without saying…").
+
+---
+
+{research_section}
+
+## STEP 2 — WRITE THE ARTICLE (IN ENGLISH)
+
+Write a complete article following ALL rules below:
+
+LANGUAGE: English — every word of the article must be in English.
+WORD COUNT: Minimum 800 words, ideal 1000-1300 words. Never go below 600 words.
+TITLE (H1): Must contain the focus keyphrase. 50-65 characters maximum. Compelling and click-worthy.
+INTRODUCTION (first 100 words):
+  - Must contain the focus keyphrase.
+  - Open with a real story, a personal anecdote, or a surprising fact.
+  - Hook the reader immediately. Do NOT start with a generic statement.
+SUBHEADINGS:
+  - At least 3 H2 subheadings.
+  - At least ONE H2 must contain the focus keyphrase or a close variant.
+  - Subheadings must be descriptive and specific. No vague headers.
+BODY CONTENT:
+  - Focus keyphrase appears naturally every 100-150 words.
+  - Sentences maximum 20 words each — no exceptions.
+  - Active voice throughout — passive voice must be less than 10% of sentences.
+  - Short paragraphs: maximum 3 sentences per paragraph.
+  - Use bullet points and numbered lists where appropriate.
+  - Include real data, statistics, and facts with sources cited.
+  - Reference personal experiences or stories inspired by the Real Business Insights articles — use them as context, not direct quotes.
+  - Include at least 1 backlink to one of the Real Business Insights articles (the most topically relevant one from the list in Step 1). Use natural anchor text.
+  - Simple language: write at maximum 8th grade reading level. Every sentence must be understood by a 10-year-old. Use short, everyday words. Avoid jargon.
+  - NO bold text (<strong>) in body paragraphs or lists. Bold is ONLY allowed inside heading tags (H1, H2, H3).
+  - NO em-dashes (—) anywhere. Replace every em-dash with a comma or a period.
+LINKS:
+  - Minimum 2 outbound links to authoritative sources (industry reports, .gov, .edu, or major publications). Use real URLs found during research.
+  - Minimum 2 internal links to other pages on chrisfountoulis.com (e.g. href="https://chrisfountoulis.com/category/real-business-insights/", href="https://chrisfountoulis.com/how-to-run-profitable-scalable-ads-article/"). Use relevant anchor text.
+  - At least 1 backlink to a Real Business Insights article (see Step 1).
+CONCLUSION: Summarize key takeaways in 2-3 short paragraphs. Include a clear Call to Action. Repeat the focus keyphrase one final time.
+
+FORMATTING RULES (STRICT):
+  - NO bold text (<strong> or **) in body paragraphs or lists.
+  - NO em-dashes (—) anywhere. Use commas or periods.
+  - Simple language: max 8th grade reading level. Short, common, everyday words only.
+  - No corporate filler phrases.
+
+## STEP 3 — YOAST SEO FIELDS
+Prepare ALL of these:
+- Focus keyphrase: 2-5 words, in English — must appear in: title, introduction, at least one H2, meta description, and slug.
+- SEO title: MUST START with the focus keyphrase, 50-65 characters maximum, format: [Keyphrase]: [Description] | Chris Fountoulis
+- Meta description: EXACTLY 120-155 characters (count carefully), contains focus keyphrase, compelling, summarizes the article accurately.
+- Slug: focus keyphrase lowercase, hyphens between words, no stop words, e.g. {slug_hint}
+
+## STEP 4 — PRE-PUBLISH CHECKLIST
+Before making the WordPress API call, verify EVERY item below. Fix anything that is not true:
+
+  [ ] Word count >= 600 (aim for 800-1300)
+  [ ] Focus keyphrase in H1 title
+  [ ] Focus keyphrase in first paragraph
+  [ ] Focus keyphrase in at least 1 H2 subheading
+  [ ] Focus keyphrase in meta description
+  [ ] Focus keyphrase starts the SEO title
+  [ ] Focus keyphrase in slug
+  [ ] Meta description is 120-155 characters (count exactly)
+  [ ] At least 2 outbound links to authoritative sources
+  [ ] At least 2 internal links to chrisfountoulis.com pages
+  [ ] At least 1 backlink to a Real Business Insights article
+  [ ] No sentences longer than 20 words
+  [ ] Active voice throughout (passive < 10%)
+  [ ] Short paragraphs (max 3 sentences)
+  [ ] At least 3 H2 subheadings
+  [ ] Conclusion with CTA included
+  [ ] All Yoast fields ready: yoast_focus_keyword, yoast_seo_title, yoast_meta_description
+  [ ] No keyword stuffing
+  [ ] NO bold text in body paragraphs or lists
+  [ ] NO em-dashes anywhere
+  [ ] Simple language throughout (10-year-old level)
+  [ ] Writing style matches Chris Fountoulis: conversational, first-person, story-driven
+  [ ] Unsplash featured image fetched, uploaded, and set as featured_media
+  [ ] Featured image img tag inserted immediately after H1, before first paragraph
+
+Do NOT proceed to publishing if any item is unchecked. Fix it first.
+
+## STEP 5 — FEATURED IMAGE FROM UNSPLASH
+Before publishing, fetch a free image from Unsplash:
+
+1. GET https://api.unsplash.com/search/photos?query=<article-topic-in-english>&per_page=1&orientation=landscape&client_id=YOUR_CLIENT_ID
+   Use the first result's `urls.regular` field.
+2. Download image bytes via requests.get(image_url, timeout=30)
+3. Upload to WordPress Media Library:
+   POST {CF_WP_URL}/wp-json/wp/v2/media
+   Headers: Authorization: Basic <base64(username:password)>, Content-Disposition: attachment; filename="<slug>.jpg", Content-Type: image/jpeg
+   Body: raw image bytes
+4. Get media `id` from the upload response.
+5. Update media SEO metadata:
+   POST {CF_WP_URL}/wp-json/wp/v2/media/<id>
+   JSON: alt_text: "<focus keyphrase> — [brief description]" (max 125 chars), title: "<focus keyphrase> image", caption: "Photo: Unsplash"
+6. Build img tag:
+   <img src="<image_url>" alt="<focus keyphrase> — [brief description]" title="<focus keyphrase>" class="wp-post-image" style="width:100%;height:auto;margin-bottom:1.5em;" />
+7. Include media id as `featured_media` in post payload.
+
+## STEP 6 — PUBLISH TO WORDPRESS VIA REST API
+Use these WordPress credentials:
+  - WordPress URL: {CF_WP_URL}
+  - Username: {CF_WP_USER}
+  - Application Password: {CF_WP_PASS}
+
+POST {CF_WP_URL}/wp-json/wp/v2/posts with Basic Authentication (base64 of username:password).
+
+JSON payload must include:
+  - title: the H1 title
+  - content: full HTML article. Structure:
+      1. <h1>...</h1>
+      2. Featured image img tag (immediately after H1, NO text between them)
+      3. Introduction paragraph and rest of article
+    Use <h2>, <h3>, <p>, <ul>, <li> — NO <strong> in body text, only in headings
+  - status: "draft"
+  - slug: the SEO slug
+  - excerpt: first 2 sentences of the article
+  - categories: relevant category IDs (look up or create via API)
+  - tags: relevant tag IDs (look up or create via API)
+  - meta fields: yoast_focus_keyword, yoast_seo_title, yoast_meta_description
+  - featured_media: the media ID from Step 5
+
+After publishing, output EXACTLY this line:
+PUBLISHED_URL: <the full URL of the draft post>
+
+Example: PUBLISHED_URL: https://chrisfountoulis.com/?p=1234
+
+## ABSOLUTE PROHIBITIONS
+- Never publish below 600 words
+- Never leave any Yoast field empty
+- Never use passive voice in more than 10% of sentences
+- Never write a sentence longer than 20 words
+- Never keyword stuff
+- Never publish without at least 2 outbound links
+- Never publish without at least 2 internal links to chrisfountoulis.com
+- Never publish without at least 1 backlink to a Real Business Insights article
+- Never publish without the focus keyphrase in the introduction
+- Never skip the pre-publish checklist
+- Never publish as "publish" — always use "draft"
+- Never use bold text (<strong>) in body paragraphs or lists
+- Never use em-dashes (—) — use commas or periods
+- Never write above 8th grade reading level
+- Never use corporate filler phrases
+- Never publish without a featured image
+"""
+
+
+# ---------------------------------------------------------------------------
 # URL extraction
 # ---------------------------------------------------------------------------
 
@@ -682,8 +999,8 @@ def extract_published_url(output: str) -> str | None:
     match = re.search(r"PUBLISHED_URL:\s*(https?://\S+)", output)
     if match:
         return match.group(1).rstrip(".")
-    # Fallback: look only for draft post URLs (/?p=ID pattern)
-    match = re.search(r"(https?://growthmedia\.gr/\?p=\d+)", output)
+    # Fallback: draft post URL for either site
+    match = re.search(r"(https?://(?:growthmedia|chrisfountoulis)\.gr/\?p=\d+)", output)
     if match:
         return match.group(1).rstrip(".")
     return None
@@ -900,6 +1217,14 @@ def run(article_type: str, topic: str = "", keyword: str = "",
 if __name__ == "__main__":
     args = sys.argv[1:]
 
+    # Detect site: --site cf or --site goi (default goi)
+    site = "goi"
+    if "--site" in args:
+        idx = args.index("--site")
+        if idx + 1 < len(args):
+            site = args[idx + 1].lower()
+            args = [a for i, a in enumerate(args) if i != idx and i != idx + 1]
+
     if args and args[0] in ("trending", "evergreen"):
         # Legacy / manual override — no sheet lookup, growthmedia.gr only
         article_type = args[0]
@@ -981,7 +1306,6 @@ if __name__ == "__main__":
     if is_sunday and (goi_assignment or cf_assignment):
         print("Sunday detected — sending weekly summary email...")
         try:
-            # Re-use a valid access token from whichever assignment succeeded
             summary_token = (
                 (goi_assignment or {}).get("access_token")
                 or (cf_assignment or {}).get("access_token")
