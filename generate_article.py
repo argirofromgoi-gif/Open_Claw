@@ -1025,6 +1025,41 @@ def extract_cf_published_url(output: str) -> str | None:
 # Sunday summary email
 # ---------------------------------------------------------------------------
 
+def get_week_articles(
+    access_token: str,
+    spreadsheet_id: str,
+    url_col: int,       # 0-based column index for published URL
+    keyword_col: int,   # 0-based column index for focus keyword
+    sheet_range: str,
+) -> list[dict]:
+    """Return all articles published in the current Mon-Sun week from a sheet."""
+    today = datetime.now()
+    week_start = today - timedelta(days=today.weekday())        # Monday
+    week_end   = week_start + timedelta(days=6)                 # Sunday
+
+    rows = _read_sheet_values(access_token, spreadsheet_id, sheet_range)
+    articles = []
+    for i, row in enumerate(rows):
+        if i == 0:
+            continue  # skip header
+        cell_date = row[0].strip() if len(row) > 0 else ""
+        cell_url  = row[url_col].strip() if len(row) > url_col else ""
+        if not cell_date or not cell_url:
+            continue
+        try:
+            row_date = datetime.strptime(cell_date, "%d/%m/%Y")
+        except ValueError:
+            continue
+        if week_start.date() <= row_date.date() <= week_end.date():
+            articles.append({
+                "date":    cell_date,
+                "topic":   row[1].strip() if len(row) > 1 else "",
+                "keyword": row[keyword_col].strip() if len(row) > keyword_col else "",
+                "url":     cell_url,
+            })
+    return articles
+
+
 def _send_gmail(access_token: str, to: str, subject: str, html_body: str) -> None:
     """Send an email via Gmail API using an OAuth access token."""
     msg = MIMEMultipart("alternative")
@@ -1047,83 +1082,104 @@ def _send_gmail(access_token: str, to: str, subject: str, html_body: str) -> Non
     logging.info("Sunday summary email sent to %s (message id: %s)", to, resp.json().get("id"))
 
 
+def _articles_table_html(articles: list[dict]) -> str:
+    """Render a list of weekly articles as an HTML table."""
+    if not articles:
+        return "<p style='color:#999;'>No articles published this week.</p>"
+
+    rows_html = ""
+    for i, a in enumerate(articles):
+        bg = " style='background:#f9f9f9;'" if i % 2 else ""
+        url_html = f'<a href="{a["url"]}" style="color:#2c7be5;">{a["url"]}</a>'
+        rows_html += f"""
+    <tr{bg}>
+      <td style="padding:6px 12px 6px 0; color:#666; white-space:nowrap;">{a["date"]}</td>
+      <td style="padding:6px 12px 6px 0;">{a["topic"]}</td>
+      <td style="padding:6px 12px 6px 0; color:#555; font-size:13px;">{a["keyword"]}</td>
+      <td style="padding:6px 0;">{url_html}</td>
+    </tr>"""
+
+    return f"""
+  <table style="width:100%; border-collapse:collapse; margin-top:8px; font-size:14px;">
+    <thead>
+      <tr style="border-bottom:2px solid #e0e0e0;">
+        <th style="padding:6px 12px 6px 0; text-align:left; color:#666;">Date</th>
+        <th style="padding:6px 12px 6px 0; text-align:left;">Topic</th>
+        <th style="padding:6px 12px 6px 0; text-align:left; color:#666;">Keyphrase</th>
+        <th style="padding:6px 0; text-align:left;">URL</th>
+      </tr>
+    </thead>
+    <tbody>{rows_html}
+    </tbody>
+  </table>"""
+
+
 def send_sunday_summary(
     goi_topic: str, goi_keyword: str, goi_url: str | None,
     cf_topic: str, cf_keyword: str, cf_url: str | None,
     access_token: str,
 ) -> None:
-    """Send a weekly summary email covering both sites' articles."""
-    today_str = datetime.now().strftime("%d %B %Y")
+    """Send a weekly summary email with ALL articles published this week for both sites."""
+    today = datetime.now()
+    week_start = today - timedelta(days=today.weekday())
+    week_end   = week_start + timedelta(days=6)
+    today_str  = today.strftime("%d %B %Y")
+    week_range = f"{week_start.strftime('%d %b')} – {week_end.strftime('%d %b %Y')}"
 
-    goi_url_html = (
-        f'<a href="{goi_url}">{goi_url}</a>' if goi_url else "<em>URL not captured — check WordPress drafts</em>"
-    )
-    cf_url_html = (
-        f'<a href="{cf_url}">{cf_url}</a>' if cf_url else "<em>URL not captured — check WordPress drafts</em>"
-    )
+    # Collect all articles for the week from both sheets
+    try:
+        goi_spreadsheet_id = _find_spreadsheet_id(access_token, "GOI Content Calendar")
+        goi_articles = get_week_articles(
+            access_token, goi_spreadsheet_id,
+            url_col=4, keyword_col=2, sheet_range="A:E",
+        )
+    except Exception as exc:
+        logging.warning("Could not fetch GOI week articles: %s", exc)
+        goi_articles = []
+
+    try:
+        cf_articles = get_week_articles(
+            access_token, CF_SPREADSHEET_ID,
+            url_col=6, keyword_col=3, sheet_range="A:G",
+        )
+    except Exception as exc:
+        logging.warning("Could not fetch CF week articles: %s", exc)
+        cf_articles = []
+
+    goi_count = len(goi_articles)
+    cf_count  = len(cf_articles)
 
     html_body = f"""
 <html>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 640px; margin: 0 auto; padding: 24px;">
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 700px; margin: 0 auto; padding: 24px;">
 
   <h1 style="color: #1a1a2e; border-bottom: 2px solid #e0e0e0; padding-bottom: 8px;">
-    Weekly Article Summary — {today_str}
+    Weekly Article Summary — {week_range}
   </h1>
+  <p style="color:#666; margin-top:4px;">Generated on {today_str} &nbsp;|&nbsp;
+    growthmedia.gr: <strong>{goi_count}</strong> article{"s" if goi_count != 1 else ""} &nbsp;|&nbsp;
+    chrisfountoulis.com: <strong>{cf_count}</strong> article{"s" if cf_count != 1 else ""}
+  </p>
 
-  <h2 style="color: #2c7be5; margin-top: 32px;">Section 1: growthmedia.gr (Greek)</h2>
-  <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
-    <tr>
-      <td style="padding: 6px 12px 6px 0; font-weight: bold; width: 140px;">Topic</td>
-      <td style="padding: 6px 0;">{goi_topic or "N/A"}</td>
-    </tr>
-    <tr style="background: #f9f9f9;">
-      <td style="padding: 6px 12px 6px 0; font-weight: bold;">Focus keyphrase</td>
-      <td style="padding: 6px 0;">{goi_keyword or "N/A"}</td>
-    </tr>
-    <tr>
-      <td style="padding: 6px 12px 6px 0; font-weight: bold;">Draft URL</td>
-      <td style="padding: 6px 0;">{goi_url_html}</td>
-    </tr>
-    <tr style="background: #f9f9f9;">
-      <td style="padding: 6px 12px 6px 0; font-weight: bold;">Status</td>
-      <td style="padding: 6px 0;">{"Published as draft" if goi_url else "Error — check logs"}</td>
-    </tr>
-  </table>
+  <h2 style="color: #2c7be5; margin-top: 32px;">growthmedia.gr — Greek articles ({goi_count})</h2>
+  {_articles_table_html(goi_articles)}
 
-  <h2 style="color: #2c7be5; margin-top: 32px;">Section 2: chrisfountoulis.com (English)</h2>
-  <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
-    <tr>
-      <td style="padding: 6px 12px 6px 0; font-weight: bold; width: 140px;">Topic</td>
-      <td style="padding: 6px 0;">{cf_topic or "N/A"}</td>
-    </tr>
-    <tr style="background: #f9f9f9;">
-      <td style="padding: 6px 12px 6px 0; font-weight: bold;">Focus keyphrase</td>
-      <td style="padding: 6px 0;">{cf_keyword or "N/A"}</td>
-    </tr>
-    <tr>
-      <td style="padding: 6px 12px 6px 0; font-weight: bold;">Draft URL</td>
-      <td style="padding: 6px 0;">{cf_url_html}</td>
-    </tr>
-    <tr style="background: #f9f9f9;">
-      <td style="padding: 6px 12px 6px 0; font-weight: bold;">Status</td>
-      <td style="padding: 6px 0;">{"Published as draft" if cf_url else "Error — check logs"}</td>
-    </tr>
-  </table>
+  <h2 style="color: #2c7be5; margin-top: 40px;">chrisfountoulis.com — English articles ({cf_count})</h2>
+  {_articles_table_html(cf_articles)}
 
   <p style="margin-top: 32px; color: #666; font-size: 13px; border-top: 1px solid #e0e0e0; padding-top: 12px;">
-    This email was generated automatically by the OpenClaw article generation system.
-    Review and publish drafts from the WordPress admin panel.
+    Generated automatically by OpenClaw. Review and publish drafts from the WordPress admin panel.
   </p>
 
 </body>
 </html>
 """
 
-    subject = f"Weekly Article Summary — {today_str}"
+    subject = f"Weekly Summary ({week_range}) — {goi_count + cf_count} articles"
     try:
         _send_gmail(access_token, SUMMARY_EMAIL_TO, subject, html_body)
-        print(f"Sunday summary email sent to {SUMMARY_EMAIL_TO}")
-        logging.info("Sunday summary email sent successfully.")
+        print(f"Sunday summary email sent to {SUMMARY_EMAIL_TO} ({goi_count + cf_count} articles total)")
+        logging.info("Sunday summary email sent: %d GOI + %d CF articles.", goi_count, cf_count)
     except Exception as exc:
         logging.error("Failed to send Sunday summary email: %s", exc)
         print(f"Warning: could not send Sunday summary email — {exc}")
