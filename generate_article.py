@@ -411,7 +411,8 @@ Before making the WordPress API call, verify EVERY item below is true. Fix anyth
   [ ] NO em-dashes (—) anywhere in the article
   [ ] Simple language throughout (max 8th grade level, clear everyday words)
   [ ] Unsplash featured image fetched, uploaded, and set as featured_media
-  [ ] Featured image img tag inserted in content immediately after the H1 tag (before first paragraph), with alt text containing the focus keyphrase
+  [ ] Featured image img tag is the FIRST element in content (NO <h1> in content — theme renders title automatically), with alt text containing the focus keyphrase
+  [ ] No <h1> tag anywhere inside the content field
 
 Do NOT proceed to publishing if any item is unchecked. Fix it first.
 
@@ -461,9 +462,9 @@ Method: POST with Basic Authentication (base64 of username:password).
 The JSON payload must include:
   - title: the H1 title (in Greek)
   - content: the full HTML article body. Structure it EXACTLY as follows:
-      1. The H1 tag: <h1>...</h1>
-      2. Immediately after the H1, the featured image img tag built in Step 5 (NO text between H1 and img)
-      3. Then the introduction paragraph and the rest of the article
+      1. The featured image img tag built in Step 5 — this is the FIRST element, NO H1 tag before or after it (the theme displays the title automatically)
+      2. Then the introduction paragraph and the rest of the article
+    Do NOT include an <h1> tag anywhere in the content field — the theme renders the title from the post title field.
     Use <h2>, <h3>, <p>, <ul>, <li> tags — NO <strong> in body text, only in headings
   - status: "draft"
   - slug: the SEO slug
@@ -632,7 +633,8 @@ Before making the WordPress API call, verify EVERY item below is true. Fix anyth
   [ ] NO em-dashes (—) anywhere in the article
   [ ] Simple language throughout (max 8th grade level, clear everyday words)
   [ ] Unsplash featured image fetched, uploaded, and set as featured_media
-  [ ] Featured image img tag inserted in content immediately after the H1 tag (before first paragraph), with alt text containing the focus keyphrase
+  [ ] Featured image img tag is the FIRST element in content (NO <h1> in content — theme renders title automatically), with alt text containing the focus keyphrase
+  [ ] No <h1> tag anywhere inside the content field
 
 Do NOT proceed to publishing if any item is unchecked. Fix it first.
 
@@ -920,7 +922,8 @@ Before making the WordPress API call, verify EVERY item below. Fix anything that
   [ ] Simple language throughout (10-year-old level)
   [ ] Writing style matches Chris Fountoulis: conversational, first-person, story-driven
   [ ] Unsplash featured image fetched, uploaded, and set as featured_media
-  [ ] Featured image img tag inserted immediately after H1, before first paragraph
+  [ ] Featured image img tag is the FIRST element in content (NO <h1> in content — theme renders title automatically), with alt text containing the focus keyphrase
+  [ ] No <h1> tag anywhere inside the content field
 
 Do NOT proceed to publishing if any item is unchecked. Fix it first.
 
@@ -953,9 +956,9 @@ POST {CF_WP_URL}/wp-json/wp/v2/posts with Basic Authentication (base64 of userna
 JSON payload must include:
   - title: the H1 title
   - content: full HTML article. Structure:
-      1. <h1>...</h1>
-      2. Featured image img tag (immediately after H1, NO text between them)
-      3. Introduction paragraph and rest of article
+      1. Featured image img tag — this is the FIRST element, NO H1 tag before or after it (the theme displays the title automatically)
+      2. Introduction paragraph and rest of article
+    Do NOT include an <h1> tag anywhere in the content field — the theme renders the title from the post title field.
     Use <h2>, <h3>, <p>, <ul>, <li> — NO <strong> in body text, only in headings
   - status: "draft"
   - slug: the SEO slug
