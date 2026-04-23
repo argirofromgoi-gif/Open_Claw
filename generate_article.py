@@ -757,6 +757,11 @@ PUBLISHED_URL: <the full URL of the draft post>
 
 Example: PUBLISHED_URL: https://chrisfountoulis.com/?p=1234
 
+## READABILITY RULES (Yoast compliance)
+- Use transition words (however, therefore, additionally, furthermore, as a result, moreover, consequently, in addition) in at least 30% of sentences
+- Never start 4 or more consecutive sentences with the same word — vary your sentence openings
+- Aim for Flesch Reading Ease score 60-80: short sentences, simple words
+
 ## ABSOLUTE PROHIBITIONS
 - Never publish below 600 words
 - Never leave any Yoast field empty
