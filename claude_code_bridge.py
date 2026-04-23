@@ -73,59 +73,77 @@ async def run_claude_code(prompt: str, working_dir: str = WORKSPACE) -> str:
 
 
 async def run_claude_code_simple(prompt: str, working_dir: str = WORKSPACE) -> str:
-    """Εκτελεί το Claude Code με απλό τρόπο χρησιμοποιώντας --print flag."""
+    """
+    Εκτελεί το Claude Code με stream-json και επιστρέφει το output του script
+    (τα ✅/❌ lines) χωρίς να περιμένει το τελικό Claude summary.
+    """
     try:
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: subprocess.run(
-                [
-                    "/home/ubuntu/.npm-global/bin/claude",
-                    "-p", prompt,
-                    "--dangerously-skip-permissions",
-                    "--output-format", "json",
-                ],
-                cwd=working_dir,
-                capture_output=True,
-                text=True,
-                timeout=3600,
-            )
+        proc = await asyncio.create_subprocess_exec(
+            "/home/ubuntu/.npm-global/bin/claude",
+            "-p", prompt,
+            "--dangerously-skip-permissions",
+            "--output-format", "stream-json",
+            cwd=working_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
 
-        raw = result.stdout.strip()
-        errors = result.stderr.strip()
-
-        # Parse JSON output to extract text result and token usage
-        output = raw
+        script_outputs = []
         input_tokens = 0
         output_tokens = 0
 
-        if raw:
-            try:
-                data = json.loads(raw)
-                output = data.get("result", raw)
-                usage = data.get("usage", {})
-                input_tokens = int(usage.get("input_tokens", 0))
-                output_tokens = int(usage.get("output_tokens", 0))
-            except (json.JSONDecodeError, TypeError, ValueError):
-                pass  # raw text fallback
+        async def read_stream():
+            nonlocal input_tokens, output_tokens
+            async for raw_line in proc.stdout:
+                line = raw_line.decode(errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                    etype = event.get("type", "")
 
-        # Log token usage and cost into bot_stats.json under the 'dev' agent
+                    # Collect tool result outputs (actual script stdout with ✅/❌)
+                    if etype == "user":
+                        content = event.get("message", {}).get("content", [])
+                        for block in content:
+                            if block.get("type") == "tool_result":
+                                tc = block.get("content", "")
+                                if isinstance(tc, list):
+                                    for c in tc:
+                                        if c.get("type") == "text" and c.get("text", "").strip():
+                                            script_outputs.append(c["text"])
+                                elif isinstance(tc, str) and tc.strip():
+                                    script_outputs.append(tc)
+
+                    # Grab token usage from the final result event
+                    elif etype == "result":
+                        usage = event.get("usage", {})
+                        input_tokens = int(usage.get("input_tokens", 0))
+                        output_tokens = int(usage.get("output_tokens", 0))
+
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+        try:
+            await asyncio.wait_for(read_stream(), timeout=TIMEOUT)
+        except asyncio.TimeoutError:
+            proc.kill()
+            if script_outputs:
+                return "\n".join(script_outputs) + f"\n\n⏱️ Timeout after {TIMEOUT}s — partial results above"
+            return f"⏱️ Timeout after {TIMEOUT}s"
+
+        await proc.wait()
+
         if _log_api_call is not None and (input_tokens or output_tokens):
             try:
                 _log_api_call(CLAUDE_CODE_CHANNEL_ID, input_tokens, output_tokens)
             except Exception:
                 pass
 
-        if output:
-            return output
-        elif errors:
-            return f"⚠️ {errors[:1000]}"
-        else:
-            return "✅ Done"
+        if script_outputs:
+            return "\n".join(script_outputs)
+        return "✅ Done"
 
-    except subprocess.TimeoutExpired:
-        return f"⏱️ Timeout after {TIMEOUT}s"
     except FileNotFoundError:
         return "❌ Claude Code not found. Run: npm install -g @anthropic-ai/claude-code"
     except Exception as e:
