@@ -126,9 +126,18 @@ async def run_claude_code_simple(prompt: str, working_dir: str = WORKSPACE) -> s
                                 elif isinstance(tc, str) and tc.strip():
                                     script_outputs.append(tc)
 
+                    # Collect assistant text responses
+                    elif etype == "assistant":
+                        msg_content = event.get("message", {}).get("content", [])
+                        for block in msg_content:
+                            if block.get("type") == "text" and block.get("text", "").strip():
+                                final_result = block["text"]
+
                     # Grab final text result and token usage
                     elif etype == "result":
-                        final_result = event.get("result", "")
+                        result_text = event.get("result", "")
+                        if result_text:
+                            final_result = result_text
                         usage = event.get("usage", {})
                         input_tokens = int(usage.get("input_tokens", 0))
                         output_tokens = int(usage.get("output_tokens", 0))
