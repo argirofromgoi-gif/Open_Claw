@@ -99,11 +99,12 @@ async def run_claude_code_simple(prompt: str, working_dir: str = WORKSPACE) -> s
         )
 
         script_outputs = []
+        final_result = ""
         input_tokens = 0
         output_tokens = 0
 
         async def read_stream():
-            nonlocal input_tokens, output_tokens
+            nonlocal input_tokens, output_tokens, final_result
             async for raw_line in proc.stdout:
                 line = raw_line.decode(errors="replace").strip()
                 if not line:
@@ -125,8 +126,9 @@ async def run_claude_code_simple(prompt: str, working_dir: str = WORKSPACE) -> s
                                 elif isinstance(tc, str) and tc.strip():
                                     script_outputs.append(tc)
 
-                    # Grab token usage from the final result event
+                    # Grab final text result and token usage
                     elif etype == "result":
+                        final_result = event.get("result", "")
                         usage = event.get("usage", {})
                         input_tokens = int(usage.get("input_tokens", 0))
                         output_tokens = int(usage.get("output_tokens", 0))
@@ -152,6 +154,8 @@ async def run_claude_code_simple(prompt: str, working_dir: str = WORKSPACE) -> s
 
         if script_outputs:
             return "\n".join(script_outputs)
+        if final_result:
+            return final_result
         return "✅ Done"
 
     except FileNotFoundError:
