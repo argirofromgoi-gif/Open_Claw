@@ -25,6 +25,16 @@ try:
 except ImportError:
     _log_api_call = None
 
+try:
+    from config import CHANNEL_PROMPTS as _CHANNEL_PROMPTS
+except ImportError:
+    _CHANNEL_PROMPTS = {}
+
+try:
+    from memory import get_history as _get_history
+except ImportError:
+    _get_history = None
+
 # Discord Channel ID για το #dev_claude
 CLAUDE_CODE_CHANNEL_ID = 1488438587778269304
 
@@ -195,7 +205,24 @@ async def handle_claude_code_channel(message):
     async with message.channel.typing():
         await message.channel.send(f"⚙️ Running Claude Code...\n> `{content[:100]}`")
 
-        output = await run_claude_code_simple(content, WORKSPACE)
+        # Build full prompt with system context + history + user message
+        channel_id = message.channel.id
+        system_prompt = _CHANNEL_PROMPTS.get(channel_id, "")
+
+        history_text = ""
+        if _get_history is not None:
+            history = _get_history(channel_id)[-10:]  # last 10 messages
+            if history:
+                history_text = "\n\n## CONVERSATION HISTORY\n"
+                for h in history:
+                    history_text += f"{h['role'].upper()}: {h['content'][:500]}\n"
+
+        if system_prompt or history_text:
+            full_prompt = f"{system_prompt}{history_text}\n\n## USER REQUEST\n{content}"
+        else:
+            full_prompt = content
+
+        output = await run_claude_code_simple(full_prompt, WORKSPACE)
 
     # Στείλε το αποτέλεσμα
     if len(output) <= 1900:
