@@ -83,77 +83,38 @@ async def run_claude_code(prompt: str, working_dir: str = WORKSPACE) -> str:
 
 
 async def run_claude_code_simple(prompt: str, working_dir: str = WORKSPACE) -> str:
-    """
-    Εκτελεί το Claude Code με stream-json και επιστρέφει το output του script
-    (τα ✅/❌ lines) χωρίς να περιμένει το τελικό Claude summary.
-    """
+    """Εκτελεί το Claude Code και επιστρέφει το αποτέλεσμα."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "/home/ubuntu/.npm-global/bin/claude",
             "-p", prompt,
             "--dangerously-skip-permissions",
-            "--output-format", "stream-json",
+            "--output-format", "json",
             cwd=working_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
 
-        script_outputs = []
-        final_result = ""
-        input_tokens = 0
-        output_tokens = 0
-
-        async def read_stream():
-            nonlocal input_tokens, output_tokens, final_result
-            async for raw_line in proc.stdout:
-                line = raw_line.decode(errors="replace").strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                    etype = event.get("type", "")
-
-                    # Collect tool result outputs (actual script stdout with ✅/❌)
-                    if etype == "user":
-                        content = event.get("message", {}).get("content", [])
-                        for block in content:
-                            if block.get("type") == "tool_result":
-                                tc = block.get("content", "")
-                                if isinstance(tc, list):
-                                    for c in tc:
-                                        if c.get("type") == "text" and c.get("text", "").strip():
-                                            script_outputs.append(c["text"])
-                                elif isinstance(tc, str) and tc.strip():
-                                    script_outputs.append(tc)
-
-                    # Collect assistant text responses
-                    elif etype == "assistant":
-                        msg_content = event.get("message", {}).get("content", [])
-                        for block in msg_content:
-                            if block.get("type") == "text" and block.get("text", "").strip():
-                                final_result = block["text"]
-
-                    # Grab final text result and token usage
-                    elif etype == "result":
-                        result_text = event.get("result", "")
-                        if result_text:
-                            final_result = result_text
-                        usage = event.get("usage", {})
-                        input_tokens = int(usage.get("input_tokens", 0))
-                        output_tokens = int(usage.get("output_tokens", 0))
-
-                except (json.JSONDecodeError, TypeError):
-                    pass
-
         try:
-            await asyncio.wait_for(read_stream(), timeout=TIMEOUT)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT)
         except asyncio.TimeoutError:
             proc.kill()
-            if script_outputs:
-                return "\n".join(script_outputs) + f"\n\n⏱️ Timeout after {TIMEOUT}s — partial results above"
             return f"⏱️ Timeout after {TIMEOUT}s"
 
-        await proc.wait()
+        raw = stdout.decode(errors="replace").strip()
+        input_tokens = 0
+        output_tokens = 0
+        output = ""
+
+        if raw:
+            try:
+                data = json.loads(raw)
+                output = data.get("result", "")
+                usage = data.get("usage", {})
+                input_tokens = int(usage.get("input_tokens", 0))
+                output_tokens = int(usage.get("output_tokens", 0))
+            except (json.JSONDecodeError, TypeError):
+                output = raw
 
         if _log_api_call is not None and (input_tokens or output_tokens):
             try:
@@ -161,10 +122,11 @@ async def run_claude_code_simple(prompt: str, working_dir: str = WORKSPACE) -> s
             except Exception:
                 pass
 
-        if script_outputs:
-            return "\n".join(script_outputs)
-        if final_result:
-            return final_result
+        if output:
+            return output
+        errors = stderr.decode(errors="replace").strip()
+        if errors:
+            return f"⚠️ {errors[:1000]}"
         return "✅ Done"
 
     except FileNotFoundError:
