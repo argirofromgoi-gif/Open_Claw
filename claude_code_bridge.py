@@ -106,13 +106,18 @@ async def run_claude_code_simple(prompt: str, working_dir: str = WORKSPACE) -> s
         output_tokens = 0
         output = ""
 
+        errors = stderr.decode(errors="replace").strip()
+
         if raw:
             try:
                 data = json.loads(raw)
                 output = data.get("result", "")
+                is_error = data.get("is_error", False)
                 usage = data.get("usage", {})
                 input_tokens = int(usage.get("input_tokens", 0))
                 output_tokens = int(usage.get("output_tokens", 0))
+                if is_error and not output:
+                    output = f"❌ Claude Code error: {data.get('error', errors or 'unknown')}"
             except (json.JSONDecodeError, TypeError):
                 output = raw
 
@@ -124,10 +129,9 @@ async def run_claude_code_simple(prompt: str, working_dir: str = WORKSPACE) -> s
 
         if output:
             return output
-        errors = stderr.decode(errors="replace").strip()
         if errors:
             return f"⚠️ {errors[:1000]}"
-        return "✅ Done"
+        return "✅ Done (no output)"
 
     except FileNotFoundError:
         return "❌ Claude Code not found. Run: npm install -g @anthropic-ai/claude-code"
